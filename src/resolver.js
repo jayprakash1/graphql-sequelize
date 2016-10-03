@@ -5,6 +5,30 @@ import { isConnection, handleConnection, nodeType } from './relay';
 import invariant from 'assert';
 import Promise from 'bluebird';
 import dataLoaderSequelize from 'dataloader-sequelize';
+import { fromGlobalId } from 'graphql-relay';
+
+/* Copied from graphql-sequelize-crud library src/index.js file - START */
+function convertFieldsFromGlobalId(Model, data) {
+  // Fix Relay Global ID
+  _.each(Object.keys(data), (k) => {
+    if (k === "clientMutationId") {
+      return;
+    }
+    // Check if reference attribute
+    let attr = Model.rawAttributes[k];
+    if (attr.references || attr.primaryKey) {
+      let {id} = fromGlobalId(data[k]);
+
+      // Check if id is numeric.
+      if(!_.isNaN(_.toNumber(id))) {
+          data[k] = parseInt(id);
+      } else {
+          data[k] = id;
+      }
+    }
+  });
+}
+/* Copied from graphql-sequelize-crud library src/index.js file - END */
 
 function whereQueryVarsToValues(o, vals) {
   _.forEach(o, (v, k) => {
@@ -36,6 +60,14 @@ function resolverFactory(target, options = {}) {
   if (options.handleConnection === undefined) options.handleConnection = true;
 
   resolver = function (source, args, context, info) {
+    if (options.globalId === true) {
+      if( args.id != null ) {
+        const {id} = fromGlobalId(args.id);
+        args.id = id; 
+      } else if (args.where != null) {
+        convertFieldsFromGlobalId(model, args.where);
+      }
+    }
     var type = info.returnType
       , list = options.list || type instanceof GraphQLList
       , findOptions = argsToFindOptions(args, targetAttributes);
@@ -55,6 +87,9 @@ function resolverFactory(target, options = {}) {
     type = type.ofType || type;
 
     findOptions.attributes = targetAttributes;
+
+    // TODO: find a better way. Adding request user for various hooks. Earlier whole context was added in graphql-sequelize but it was removed in this commit. https://github.com/mickhansen/graphql-sequelize/commit/eef95ba0d2f9a7f29bcd061a664c930c97c3f3f3 (which might need more investigation ). for now requestUser should work
+    findOptions.requestUser = context.user;
     findOptions.logging = findOptions.logging || context.logging;
     findOptions.graphqlContext = context;
 
@@ -78,7 +113,7 @@ function resolverFactory(target, options = {}) {
 
           return result;
         } else {
-          return source[association.accessors.get](findOptions).then(function (result) {
+          return source[association.accessors.get]({...findOptions}).then(function (result) {
             if (options.handleConnection && isConnection(info.returnType)) {
               return handleConnection(result, args);
             }

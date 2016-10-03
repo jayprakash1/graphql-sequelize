@@ -7,6 +7,7 @@ import {
 } from 'graphql-relay';
 
 import {
+  GraphQLInt,
   GraphQLList,
   GraphQLEnumType
 } from 'graphql';
@@ -18,6 +19,8 @@ import {
 
 import _ from 'lodash';
 import simplifyAST from './simplifyAST';
+import JSONType from './types/jsonType';
+import {replaceWhereOperators} from './replaceWhereOperators';
 
 export class NodeTypeMapper {
   constructor() {
@@ -51,7 +54,7 @@ export function idFetcher(sequelize, nodeTypeMapper) {
 
     const model = Object.keys(sequelize.models).find(model => model === type);
     return model
-      ? sequelize.models[model].findById(id)
+      ? sequelize.models[model].findById(id, {requestUser: context.user})
       : nodeType
         ? nodeType.type
         : null;
@@ -143,6 +146,12 @@ export function sequelizeConnection({
     ...connectionArgs,
     orderBy: {
       type: new GraphQLList(orderByEnum)
+    },
+    offset: {
+      type: GraphQLInt
+    },
+    where: {
+      type: JSONType
     }
   };
 
@@ -190,6 +199,9 @@ export function sequelizeConnection({
     let result = {};
 
     _.each(args, (value, key) => {
+      if (key === "where"){
+        _.assign(result, replaceWhereOperators(value));
+      }
       if (key in $connectionArgs) return;
       _.assign(result, where(key, value, result));
     });
@@ -263,11 +275,15 @@ export function sequelizeConnection({
 
       options.where = argsToWhere(args);
 
-      if (args.after || args.before) {
-        let cursor = fromCursor(args.after || args.before);
-        let startIndex = Number(cursor.index);
+      if (args.after || args.before || args.offset) {
+        if (args.offset) {
+          options.offset = args.offset;
+        } else {
+          let cursor = fromCursor(args.after || args.before);
+          let startIndex = Number(cursor.index);
 
-        if (startIndex >= 0) options.offset = startIndex + 1;
+          if (startIndex > 0) options.offset = startIndex + 1;
+        }
       }
       options.attributes = _.uniq(options.attributes);
       return before(options, args, context, info);
@@ -314,7 +330,7 @@ export function sequelizeConnection({
 
       let hasNextPage = false;
       let hasPreviousPage = false;
-      if (args.first || args.last) {
+      if (args.first || args.last || args.offset) {
         const count = parseInt(args.first || args.last, 10);
         let index = cursor ? Number(cursor.index) : null;
         if (index !== null) {
@@ -323,8 +339,14 @@ export function sequelizeConnection({
           index = 0;
         }
 
-        hasNextPage = index + 1 + count <= fullCount;
-        hasPreviousPage = index - count >= 0;
+        // TODO: wrote different logic for offset instead of trying to merge logic with cursor which seems confusing to me
+        if (args.offset) {
+          hasNextPage = Number(args.offset) + count < fullCount;
+          hasPreviousPage = args.offset > 0;
+        } else {
+          hasNextPage = index + 1 + count <= fullCount;
+          hasPreviousPage = index - count >= 0;
+        }
 
         if (args.last) {
           [hasNextPage, hasPreviousPage] = [hasPreviousPage, hasNextPage];

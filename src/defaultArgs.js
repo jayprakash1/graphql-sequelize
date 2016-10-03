@@ -1,14 +1,21 @@
 import * as typeMapper from './typeMapper';
 import JSONType from './types/jsonType';
+import {GraphQLID} from 'graphql';
 
-module.exports = function (Model) {
+module.exports = function (Model, options) {
   var result = {}
     , key = Model.primaryKeyAttribute
     , attribute = Model.rawAttributes[key]
     , type;
+  
+  options = options || {};
 
   if (key && attribute) {
-    type = typeMapper.toGraphQL(attribute.type, Model.sequelize.constructor);
+    if(options.globalId){
+      type = GraphQLID; 
+    } else {
+      type = typeMapper.toGraphQL(attribute.type, Model.sequelize.constructor);
+    }
     result[key] = {
       type: type
     };
