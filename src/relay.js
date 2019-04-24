@@ -22,6 +22,12 @@ import simplifyAST from './simplifyAST';
 import JSONType from './types/jsonType';
 import {replaceWhereOperators} from './replaceWhereOperators';
 
+import {Model} from 'sequelize';
+
+function getModelOfInstance(instance) {
+  return instance instanceof Model ? instance.constructor : instance.Model;
+}
+
 export class NodeTypeMapper {
   constructor() {
     this.map = { };
@@ -66,7 +72,9 @@ export function typeResolver(nodeTypeMapper) {
     var type = obj.__graphqlType__
                || (obj.Model
                  ? obj.Model.options.name.singular
-                 : (obj._modelOptions ? obj._modelOptions.name.singular : obj.name));
+                 : obj._modelOptions
+                 ? obj._modelOptions.name.singular
+                 : obj.name);
 
     if (!type) {
       throw new Error(`Unable to determine type of ${ typeof obj }. ` +
@@ -86,7 +94,7 @@ export function handleConnection(values, args) {
   return connectionFromArray(values, args);
 }
 
-export function sequelizeNodeInterface(sequelize) {
+export function createNodeInterface(sequelize) {
   let nodeTypeMapper = new NodeTypeMapper();
   const nodeObjects = nodeDefinitions(
     idFetcher(sequelize, nodeTypeMapper),
@@ -99,59 +107,22 @@ export function sequelizeNodeInterface(sequelize) {
   };
 }
 
+export {createNodeInterface as sequelizeNodeInterface};
+
 export function nodeType(connectionType) {
   return connectionType._fields.edges.type.ofType._fields.node.type;
 }
 
-export function sequelizeConnection({
-  name,
-  nodeType,
-  target,
-  orderBy: orderByEnum,
+export function createConnectionResolver({
+  target: targetMaybeThunk,
   before,
   after,
-  connectionFields,
-  edgeFields,
-  where
+  where,
+  orderBy: orderByEnum,
+  ignoreArgs
 }) {
-  const {
-    edgeType,
-    connectionType
-  } = connectionDefinitions({
-    name,
-    nodeType,
-    connectionFields,
-    edgeFields
-  });
-
-  const model = target.target ? target.target : target;
-  const SEPERATOR = '$';
-  const PREFIX = 'arrayconnection' + SEPERATOR;
-
-  if (orderByEnum === undefined) {
-    orderByEnum = new GraphQLEnumType({
-      name: name + 'ConnectionOrder',
-      values: {
-        ID: {value: [model.primaryKeyAttribute, 'ASC']}
-      }
-    });
-  }
-
   before = before || ((options) => options);
   after = after || ((result) => result);
-
-  let $connectionArgs = {
-    ...connectionArgs,
-    orderBy: {
-      type: new GraphQLList(orderByEnum)
-    },
-    offset: {
-      type: GraphQLInt
-    },
-    where: {
-      type: JSONType
-    }
-  };
 
   let orderByAttribute = function (orderAttr, {source, args, context, info}) {
     return typeof orderAttr === 'function' ? orderAttr(source, args, context, info) : orderAttr;
@@ -173,8 +144,9 @@ export function sequelizeConnection({
    * @return {String}          The Base64 encoded cursor string
    */
   let toCursor = function (item, index) {
-    let id = item.get(model.primaryKeyAttribute);
-    return base64(PREFIX + id + SEPERATOR + index);
+    const {primaryKeyAttribute} = getModelOfInstance(item);
+    const id = typeof primaryKeyAttribute === 'string' ? item.get(primaryKeyAttribute) : null;
+    return base64(JSON.stringify([id, index]));
   };
 
   /**
@@ -183,9 +155,7 @@ export function sequelizeConnection({
    * @return {Object}        Object containing ID and index
    */
   let fromCursor = function (cursor) {
-    cursor = unbase64(cursor);
-    cursor = cursor.substring(PREFIX.length, cursor.length);
-    let [id, index] = cursor.split(SEPERATOR);
+    let [id, index] = JSON.parse(unbase64(cursor));
 
     return {
       id,
@@ -196,18 +166,20 @@ export function sequelizeConnection({
   let argsToWhere = function (args) {
     let result = {};
 
+    if (where === undefined) return result;
+
     _.each(args, (value, key) => {
       if (key === "where"){
         _.assign(result, replaceWhereOperators(value));
       }
-      if (key in $connectionArgs) return;
-      _.assign(result, where(key, value));
+      if (ignoreArgs && key in ignoreArgs) return;
+      _.assign(result, where(key, value, result));
     });
 
     return result;
   };
 
-  let resolveEdge = function (item, index, queriedCursor, args = {}, source) {
+  let resolveEdge = function (item, index, queriedCursor, sourceArgs = {}, source) {
     let startIndex = null;
     if (queriedCursor) startIndex = Number(queriedCursor.index);
     if (startIndex !== null) {
@@ -219,24 +191,30 @@ export function sequelizeConnection({
     return {
       cursor: toCursor(item, index + startIndex),
       node: item,
-      source: source
+      source: source,
+      sourceArgs
     };
   };
 
-  let $resolver = require('./resolver')(target, {
+  let $resolver = require('./resolver')(targetMaybeThunk, {
     handleConnection: false,
     list: true,
     before: function (options, args, context, info) {
+      const target = info.target;
+      const model = target.target ? target.target : target;
+
       if (args.first || args.last) {
         options.limit = parseInt(args.first || args.last, 10);
       }
-      if (!args.orderBy) {
-        args.orderBy = [orderByEnum._values[0].value];
-      } else if (typeof args.orderBy === 'string') {
-        args.orderBy = [orderByEnum._nameLookup[args.orderBy].value];
+
+      let orderBy = args.orderBy ? args.orderBy :
+                    orderByEnum ? [orderByEnum._values[0].value] :
+                    [[model.primaryKeyAttribute, 'ASC']];
+
+      if (orderByEnum && typeof orderBy === 'string') {
+        orderBy = [orderByEnum._nameLookup[args.orderBy].value];
       }
 
-      let orderBy = args.orderBy;
       let orderAttribute = orderByAttribute(orderBy[0][0], {
         source: info.source,
         args,
@@ -289,6 +267,7 @@ export function sequelizeConnection({
     after: async function (values, args, context, info) {
       const {
         source,
+        target
       } = info;
 
       var cursor = null;
@@ -361,30 +340,89 @@ export function sequelizeConnection({
           endCursor: lastEdge ? lastEdge.cursor : null,
           hasNextPage: hasNextPage,
           hasPreviousPage: hasPreviousPage
-        }
-      });
+        },
+        fullCount
+      }, args, context, info);
     }
   });
 
-  let resolver = (source, args, context, info) => {
+  let resolveConnection = (source, args, context, info) => {
     var fieldNodes = info.fieldASTs || info.fieldNodes;
     if (simplifyAST(fieldNodes[0], info).fields.edges) {
       return $resolver(source, args, context, info);
     }
 
-    return {
+    return after({
       source,
       args,
       where: argsToWhere(args)
-    };
+    }, args, context, info);
   };
+
+  return {
+    resolveEdge,
+    resolveConnection
+  };
+}
+
+export function createConnection({
+  name,
+  nodeType,
+  target: targetMaybeThunk,
+  orderBy: orderByEnum,
+  before,
+  after,
+  connectionFields,
+  edgeFields,
+  where
+}) {
+  const {
+    edgeType,
+    connectionType
+  } = connectionDefinitions({
+    name,
+    nodeType,
+    connectionFields,
+    edgeFields
+  });
+
+  let $connectionArgs = {
+    ...connectionArgs
+    offset: {
+      type: GraphQLInt
+    },
+    where: {
+      type: JSONType
+    }
+  };
+
+  if (orderByEnum) {
+    $connectionArgs.orderBy = {
+      type: new GraphQLList(orderByEnum)
+    };
+  }
+
+  const {
+    resolveEdge,
+    resolveConnection
+  } = createConnectionResolver({
+    orderBy: orderByEnum,
+    target: targetMaybeThunk,
+    before,
+    after,
+    where,
+    ignoreArgs: $connectionArgs
+  });
 
   return {
     connectionType,
     edgeType,
     nodeType,
     resolveEdge,
+    resolveConnection,
     connectionArgs: $connectionArgs,
-    resolve: resolver
+    resolve: resolveConnection
   };
 }
+
+export {createConnection as sequelizeConnection};

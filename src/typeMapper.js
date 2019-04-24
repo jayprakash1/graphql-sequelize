@@ -1,11 +1,15 @@
 import {
-   GraphQLInt,
-   GraphQLString,
-   GraphQLBoolean,
-   GraphQLFloat,
-   GraphQLEnumType,
-   GraphQLList
- } from 'graphql';
+  GraphQLInt,
+  GraphQLString,
+  GraphQLBoolean,
+  GraphQLFloat,
+  GraphQLEnumType,
+  GraphQLList,
+} from 'graphql';
+
+import DateType from './types/dateType';
+import JSONType from './types/jsonType';
+import _ from 'lodash';
 
 let customTypeMapper;
 /**
@@ -15,7 +19,6 @@ let customTypeMapper;
 export function mapType(mapFunc) {
   customTypeMapper = mapFunc;
 }
-
 
 /**
  * Checks the type of the sequelize data type and
@@ -50,33 +53,39 @@ export function toGraphQL(sequelizeType, sequelizeTypes) {
     DATEONLY,
     TIME,
     ARRAY,
-    VIRTUAL
+    VIRTUAL,
+    JSON
   } = sequelizeTypes;
 
-
-
-  // Regex for finding special characters
-  const specialChars = /[^a-z\d_]/i;
+  // Map of special characters
+  const specialCharsMap = new Map([
+    ['¼', 'frac14'],
+    ['½', 'frac12'],
+    ['¾', 'frac34']
+  ]);
 
   if (sequelizeType instanceof BOOLEAN) return GraphQLBoolean;
 
   if (sequelizeType instanceof FLOAT ||
       sequelizeType instanceof DOUBLE) return GraphQLFloat;
 
-  if (sequelizeType instanceof INTEGER) {
-    return GraphQLInt;
+  if (sequelizeType instanceof DATE) {
+    return DateType;
   }
 
   if (sequelizeType instanceof CHAR ||
       sequelizeType instanceof STRING ||
       sequelizeType instanceof TEXT ||
       sequelizeType instanceof UUID ||
-      sequelizeType instanceof DATE ||
       sequelizeType instanceof DATEONLY ||
       sequelizeType instanceof TIME ||
       sequelizeType instanceof BIGINT ||
       sequelizeType instanceof DECIMAL) {
     return GraphQLString;
+  }
+
+  if (sequelizeType instanceof INTEGER) {
+    return GraphQLInt;
   }
 
   if (sequelizeType instanceof ARRAY) {
@@ -86,20 +95,11 @@ export function toGraphQL(sequelizeType, sequelizeTypes) {
 
   if (sequelizeType instanceof ENUM) {
     return new GraphQLEnumType({
-      values: sequelizeType.values.reduce((obj, value) => {
-        let sanitizedValue = value;
-        if (specialChars.test(value)) {
-          sanitizedValue = value.split(specialChars).reduce((reduced, val, idx) => {
-            let newVal = val;
-            if (idx > 0) {
-              newVal = `${val[0].toUpperCase()}${val.slice(1)}`;
-            }
-            return `${reduced}${newVal}`;
-          });
-        }
-        obj[sanitizedValue] = {value};
-        return obj;
-      }, {})
+      name: 'tempEnumName',
+      values: _(sequelizeType.values)
+        .mapKeys(sanitizeEnumValue)
+        .mapValues(v => ({value: v}))
+        .value()
     });
   }
 
@@ -110,6 +110,19 @@ export function toGraphQL(sequelizeType, sequelizeTypes) {
     return returnType;
   }
 
+  if (sequelizeType instanceof JSON) {
+    return JSONType;
+  }
+
   throw new Error(`Unable to convert ${sequelizeType.key || sequelizeType.toSql()} to a GraphQL type`);
 
+  function sanitizeEnumValue(value) {
+    return value
+      .trim()
+      .replace(/([^_a-zA-Z0-9])/g, (_, p) => specialCharsMap.get(p) || ' ')
+      .split(' ')
+      .map((v, i) => i ? _.upperFirst(v) : v)
+      .join('')
+      .replace(/(^\d)/, '_$1');
+  }
 }

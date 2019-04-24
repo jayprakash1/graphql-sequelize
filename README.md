@@ -5,6 +5,8 @@
 [![Slack](http://sequelize-slack.herokuapp.com/badge.svg)](http://sequelize-slack.herokuapp.com)
 [![Coverage](https://codecov.io/gh/mickhansen/graphql-sequelize/branch/master/graph/badge.svg)](https://codecov.io/gh/mickhansen/graphql-sequelize)
 
+Should be used with [dataloader-sequelize](https://github.com/mickhansen/dataloader-sequelize) to avoid N+1 queries
+
 - [Installation](#installation)
 - [Resolve helpers](#resolve-helpers)
 - [field helpers](#field-helpers)
@@ -18,6 +20,12 @@ graphql-sequelize assumes you have graphql and sequelize installed.
 
 ## Resolve helpers
 
+```js
+import { resolver } from "graphql-sequelize";
+
+resolver(SequelizeModel[, options]);
+```
+
 A helper for resolving graphql queries targeted at Sequelize models or associations.
 Please take a look at [the tests](https://github.com/mickhansen/graphql-sequelize/blob/master/test/integration/resolver.test.js) to best get an idea of implementation.
 
@@ -26,12 +34,66 @@ Please take a look at [the tests](https://github.com/mickhansen/graphql-sequeliz
 - Automatically converts args to where if arg keys matches model attributes
 - Automatically converts an arg named 'limit' to a sequelize limit
 - Automatically converts an arg named 'order' to a sequelize order
-- Only loads the attributes defined in the query (automatically adds primary key and foreign keys)
-- Batching of nested associations (see [dataloader-sequelize](https://github.com/mickhansen/dataloader-sequelize))
 
 ### Relay & Connections
 
 [Relay documentation](docs/relay.md)
+
+### Options
+
+The `resolver` function takes a model as its first (required) argument, but also
+has a second options object argument. The available options are:
+
+```js
+resolver(SequelizeModel, {
+  // Whether or not this should return a list. Defaults to whether or not the
+  // field type is an instance of `GraphQLList`.
+  list: false,
+
+  // Whether or not relay connections should be handled. Defaults to `true`.
+  handleConnection: true,
+
+  // Whether or not Sequelize should be shimmed to use Dataloader. Disable by setting this value to boolean false.
+  dataLoader: false,
+
+  /**
+   * Manipulate the query before it's sent to Sequelize.
+   * @param findOptions {object} - Options sent to Seqeulize model's find function
+   * @param args {object} - The arguments from the incoming GraphQL query
+   * @param context {object} - Resolver context, see more at GraphQL docs below.
+   * @returns findOptions or promise that resolves with findOptions
+   */
+  before: (findOptions, args, context) => {
+    findOptions.where = { /* Custom where arguments */ };
+    return findOptions;
+  },
+  /**
+   * Manipulate the Sequelize find results before it's sent back to the requester.
+   * @param result {object|array} - Result of the query, object or array depending on list or not.
+   * @param args {object} - The arguments from the incoming GraphQL query
+   * @param context {object} - Resolver context, see more at GraphQL docs below.
+   * @returns result(s) or promise that resolves with result(s)
+   */
+  after: (result, args, context) => {
+    result.sort(/* Custom sort function */);
+    return result;
+  },
+
+  /*
+   * Transfer fields from the graphql context to the options passed to model calls
+   * Inherits from global resolver.contextToOptions
+   */
+  contextToOptions: {
+    a: 'a',
+    b: 'c'
+  }
+});
+
+resolver.contextToOptions = {}; /* Set contextToOptions globally */
+```
+
+_The `args` and `context` parameters are provided by GraphQL. More information
+about those is available in their [resolver docs](http://graphql.org/learn/execution/#root-fields-resolvers)._
 
 ### Examples
 
@@ -86,6 +148,7 @@ let schema = new GraphQLSchema({
   query: new GraphQLObjectType({
     name: 'RootQueryType',
     fields: {
+      // Field for retrieving a user by ID
       user: {
         type: userType,
         // args will automatically be mapped to `where`
@@ -96,6 +159,41 @@ let schema = new GraphQLSchema({
           }
         },
         resolve: resolver(User)
+      },
+
+      // Field for searching for a user by name
+      userSearch: {
+        type: new GraphQLList(userType),
+        args: {
+          query: {
+            description: "Fuzzy-matched name of user",
+            type: new GraphQLNonNull(GraphQLString),
+          }
+        },
+        resolve: resolver(User, {
+          // Custom `where` clause that fuzzy-matches user's name and
+          // alphabetical sort by username
+          before: (findOptions, args) => {
+            findOptions.where = {
+              name: { "$like": `%${args.query}%` },
+            };
+            findOptions.order = [['name', 'ASC']];
+            return findOptions;
+          },
+          // Custom sort override for exact matches first
+          after: (results, args) => {
+            return results.sort((a, b) => {
+              if (a.name === args.query) {
+                return 1;
+              }
+              else if (b.name === args.query) {
+                return -1;
+              }
+
+              return 0;
+            });
+          }
+        })
       }
     }
   })
@@ -199,7 +297,7 @@ var Model = sequelize.define('User', {
 });
 
 import {attributeFields,typeMapper} from 'graphql-sequelize';
-typeMapper.mapType((type) => {s
+typeMapper.mapType((type) => {
    //map bools as strings
    if (type instanceof Sequelize.BOOLEAN) {
      return GraphQLString
@@ -297,9 +395,16 @@ attributeFields(Model, {
 
 ### ENUM attributes with non-alphanumeric characters
 
-GraphQL enum types [only support ASCII alphanumeric characters and underscores](https://facebook.github.io/graphql/#Name).
+GraphQL enum types [only support ASCII alphanumeric characters, digits and underscores with leading non-digit](https://facebook.github.io/graphql/#Name).
 If you have other characters, like a dash (`-`) in your Sequelize enum types,
-they will be converted to camelCase. For example: `foo-bar` becomes `fooBar`.
+they will be converted to camelCase. If your enum value starts from a digit, it
+will be prepended with an underscore.
+
+For example:
+
+- `foo-bar` becomes `fooBar`
+
+- `25.8` becomes `_258`
 
 ### VIRTUAL attributes and GraphQL fields
 
@@ -366,6 +471,24 @@ defaultArgs(Model);
   }
 }
 */
+```
+
+If you would like to pass "where" as a query variable - you should pass it as a JSON string and declare its type as SequelizeJSON:
+
+```
+/* with GraphiQL */
+// request
+query($where: SequelizeJSON) {
+  user(where: $where) {
+    name
+  }
+}
+
+// query variables
+# JSON doesn't allow single quotes, so you need to use escaped double quotes in your JSON string
+{
+  "where": "{\"name\": {\"like\": \"Henry%\"}}"
+}
 ```
 
 ### defaultListArgs

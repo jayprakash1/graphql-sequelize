@@ -4,21 +4,25 @@ import {GraphQLID} from 'graphql';
 
 module.exports = function (Model, options) {
   var result = {}
-    , key = Model.primaryKeyAttribute
-    , attribute = Model.rawAttributes[key]
+    , keys = Model.primaryKeyAttributes
     , type;
   
   options = options || {};
 
-  if (key && attribute) {
-    if(options.globalId){
-      type = GraphQLID; 
-    } else {
-      type = typeMapper.toGraphQL(attribute.type, Model.sequelize.constructor);
-    }
-    result[key] = {
-      type: type
-    };
+  if (keys) {
+    keys.forEach(key => {
+      var attribute = Model.rawAttributes[key];
+      if (attribute) {
+        if(options.globalId){
+          type = GraphQLID; 
+        } else {
+          type = typeMapper.toGraphQL(attribute.type, Model.sequelize.constructor);
+        }
+        result[key] = {
+          type: type
+        };
+      }
+    });
   }
 
   // add where

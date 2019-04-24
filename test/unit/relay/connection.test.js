@@ -1,7 +1,7 @@
 import Sequelize from 'sequelize';
 import {expect} from 'chai';
 import sinon from 'sinon';
-import { sequelize } from '../../support/helper'
+import { sequelize } from '../../support/helper';
 import attributeFields from '../../../src/attributeFields';
 
 import {
@@ -34,13 +34,15 @@ describe('relay', function () {
         }
       });
 
-      this.spy = sinon.spy(options => options);
+      this.beforeSpy = sinon.spy(options => options);
+      this.afterSpy = sinon.spy(options => options);
 
       this.viewerTaskConnection = sequelizeConnection({
         name: 'Viewer' + this.Task.name,
         nodeType: this.taskType,
         target: this.User.Tasks,
-        before: this.spy
+        before: this.beforeSpy,
+        after: this.afterSpy
       });
 
       this.viewerType = new GraphQLObjectType({
@@ -76,7 +78,9 @@ describe('relay', function () {
         id: Math.ceil(Math.random() * 999)
       });
 
-      this.sinon.stub(this.Task, 'findAll').resolves([this.Task.build()]);
+      const task = this.Task.build();
+      task.dataValues.full_count = Math.random() * 999;
+      this.sinon.stub(this.Task, 'findAll').resolves([task]);
       this.sinon.stub(this.User, 'findById').resolves(this.User.build());
     });
 
@@ -85,7 +89,7 @@ describe('relay', function () {
     });
 
     it('passes context, root and info to before', async function () {
-      await graphql(this.schema, `
+      const result = await graphql(this.schema, `
         query {
           viewer {
             tasks {
@@ -101,10 +105,13 @@ describe('relay', function () {
         viewer: this.viewer
       });
 
-      expect(this.spy).to.have.been.calledWithMatch(
+      if (result.errors) throw new Error(result.errors[0]);
+
+      expect(this.beforeSpy).to.have.been.calledOnce;
+      expect(this.beforeSpy).to.have.been.calledWithMatch(
         sinon.match.any,
         sinon.match({
-          orderBy: sinon.match.any
+          first: sinon.match.any
         }),
         sinon.match({
           viewer: {
@@ -115,6 +122,24 @@ describe('relay', function () {
           ast: sinon.match.any
         })
       );
+
+      expect(this.afterSpy).to.have.been.calledWithMatch(
+        sinon.match({
+          fullCount: sinon.match.number
+        }),
+        sinon.match({
+          first: sinon.match.any
+        }),
+        sinon.match({
+          viewer: {
+            id: this.viewer.id
+          }
+        }),
+        sinon.match({
+          path: sinon.match.any
+        })
+      );
+
     });
   });
 });

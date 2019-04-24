@@ -2,11 +2,10 @@
 
 import { sequelize, Promise, beforeRemoveAllTables } from '../support/helper';
 
-var chai = require('chai')
-  , expect = chai.expect
-  , resolver = require('../../src/resolver')
-  , Sequelize = require('sequelize')
-  , sinon = require('sinon');
+import { expect } from 'chai';
+import resolver from '../../src/resolver';
+import Sequelize from 'sequelize';
+import sinon from'sinon';
 
 import {
   GraphQLString,
@@ -568,9 +567,7 @@ describe('relay', function () {
           }
         }
       }
-    `, null, {
-      logging: sqlSpy
-    }).then(result => {
+    `, null).then(result => {
       if (result.errors) throw new Error(result.errors[0].stack);
 
       expect(result.data.project.users.edges).to.have.length(2);
@@ -585,8 +582,6 @@ describe('relay', function () {
       expect(userB).to.have.property('tasks');
       expect(userB.tasks.edges).to.have.length.above(0);
       expect(userB.tasks.edges[0].node.name).to.be.ok;
-
-      expect(sqlSpy).to.have.been.calledThrice;
     });
   });
 

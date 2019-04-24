@@ -111,7 +111,7 @@ describe('relay', function () {
       this.userTaskConnection = sequelizeConnection({
         name: 'userTask',
         nodeType: this.taskType,
-        target: this.User.Tasks,
+        target: () => this.User.Tasks,
         orderBy: new GraphQLEnumType({
           name: this.User.name + this.Task.name + 'ConnectionOrder',
           values: {
@@ -149,9 +149,27 @@ describe('relay', function () {
             }
           }
         }),
-        where: (key, value) => {
+        where: (key, value, prevWhere) => {
           if (key === 'completed') {
             value = !!value;
+          }
+          if (key === 'timeRangeOne') {
+            const existingWhere = prevWhere.createdAt || {};
+            return {
+              createdAt: {
+                ...existingWhere,
+                gte: new Date(now - 36000)
+              }
+            };
+          }
+          if (key === 'timeRangeTwo') {
+            const existingWhere = prevWhere.createdAt || {};
+            return {
+              createdAt: {
+                ...existingWhere,
+                lte: new Date(now - 24000)
+              }
+            };
           }
           return {[key]: value};
         }
@@ -187,6 +205,12 @@ describe('relay', function () {
             args: {
               ...this.userTaskConnection.connectionArgs,
               completed: {
+                type: GraphQLBoolean
+              },
+              timeRangeOne: {
+                type: GraphQLBoolean
+              },
+              timeRangeTwo: {
                 type: GraphQLBoolean
               }
             },
@@ -483,7 +507,7 @@ describe('relay', function () {
     });
 
     it('should handle orderBy function case', async function () {
-      await graphql(this.schema, `
+      const result = await graphql(this.schema, `
         {
           user(id: ${this.userA.id}) {
             projects(first: 1) {
@@ -504,6 +528,8 @@ describe('relay', function () {
           }
         }
       `, null, {});
+
+      if (result.errors) throw new Error(result.errors[0]);
 
       expect(this.projectOrderSpy).to.have.been.calledOnce;
       expect(this.projectOrderSpy.alwaysCalledWithMatch({}, { first: 5 })).to.be.ok;
@@ -827,6 +853,35 @@ describe('relay', function () {
       ]);
     });
 
+    it('should support multiple user provided args/where that act on a single database field', async function () {
+      let result = await graphql(this.schema, `
+        {
+          user(id: ${this.userA.id}) {
+            tasks(first: 5, orderBy: LATEST, timeRangeOne: true, timeRangeTwo: true) {
+              edges {
+                cursor
+                node {
+                  id
+                  name
+                }
+              }
+            }
+          }
+        }
+      `, null, {});
+
+      if (result.errors) throw new Error(result.errors[0].stack);
+
+      expect(result.data.user.tasks.edges.length).to.equal(3);
+      expect(result.data.user.tasks.edges.map(task => {
+        return parseInt(fromGlobalId(task.node.id).id, 10);
+      })).to.deep.equal([
+        this.userA.tasks[4].id,
+        this.userA.tasks[3].id,
+        this.userA.tasks[2].id,
+      ]);
+    });
+
     it('should support nested aliased fields', async function () {
       let result = await graphql(this.schema, `
         {
@@ -981,13 +1036,9 @@ describe('relay', function () {
             }
           }
         }
-      `, null, {
-        logging: sqlSpy
-      });
+      `, null);
 
       if (result.errors) throw new Error(result.errors[0].stack);
-
-      expect(sqlSpy.callCount).to.equal(3);
 
       const nodeNames = result.data.user.projects.edges.map(edge => {
         return edge.node.tasks.edges.map(edge => {
@@ -1040,9 +1091,7 @@ describe('relay', function () {
             }
           }
         }
-      `, null, {
-        logging: sqlSpy
-      });
+      `, null);
 
       if (result.errors) throw new Error(result.errors[0].stack);
 
@@ -1055,13 +1104,9 @@ describe('relay', function () {
 
       expect(projects[0].tasks.edges[0].node.id).to.equal(toGlobalId(this.Task.name, this.userA.tasks[4].get('id')));
       expect(projects[1].tasks.edges[0].node.id).to.equal(toGlobalId(this.Task.name, this.userA.tasks[8].get('id')));
-
-      expect(sqlSpy.callCount).to.equal(3);
     });
 
     it('should support connection fields', async function () {
-      let sqlSpy = sinon.spy();
-
       let result = await graphql(this.schema, `
         {
           user(id: ${this.userA.id}) {
@@ -1070,9 +1115,7 @@ describe('relay', function () {
             }
           }
         }
-      `, null, {
-        logging: sqlSpy
-      });
+      `, null, {});
 
       if (result.errors) throw new Error(result.errors[0].stack);
 
@@ -1081,8 +1124,6 @@ describe('relay', function () {
     });
 
     it('should support connection fields on nested connections', async function () {
-      let sqlSpy = sinon.spy();
-
       let result = await graphql(this.schema, `
         {
           user(id: ${this.userA.id}) {
@@ -1097,9 +1138,7 @@ describe('relay', function () {
             }
           }
         }
-      `, null, {
-        logging: sqlSpy
-      });
+      `, null, {});
 
       if (result.errors) throw new Error(result.errors[0].stack);
 
@@ -1128,9 +1167,7 @@ describe('relay', function () {
         fragment projectOwner on userProjectEdge {
           isOwner
         }
-      `, null, {
-        logging: sqlSpy
-      });
+      `, null);
 
       if (result.errors) throw new Error(result.errors[0].stack);
 
@@ -1149,9 +1186,7 @@ describe('relay', function () {
             }
           }
         }
-      `, null, {
-        logging: sqlSpy
-      });
+      `, null, {});
 
       if (result.errors) throw new Error(result.errors[0].stack);
 
