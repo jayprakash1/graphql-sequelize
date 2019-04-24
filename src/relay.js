@@ -60,7 +60,7 @@ export function idFetcher(sequelize, nodeTypeMapper) {
 
     const model = Object.keys(sequelize.models).find(model => model === type);
     return model
-      ? sequelize.models[model].findById(id, {requestUser: context.user})
+      ? sequelize.models[model].findById(id, {requestUser: context && context.user ? context.user : null})
       : nodeType
         ? nodeType.type
         : null;
@@ -387,7 +387,7 @@ export function createConnection({
   });
 
   let $connectionArgs = {
-    ...connectionArgs
+    ...connectionArgs,
     offset: {
       type: GraphQLInt
     },

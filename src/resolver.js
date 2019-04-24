@@ -6,7 +6,6 @@ import invariant from 'assert';
 import Promise from 'bluebird';
 import dataLoaderSequelize from 'dataloader-sequelize';
 import { fromGlobalId } from 'graphql-relay';
-import _ from 'lodash';
 
 /* Copied from graphql-sequelize-crud library src/index.js file - START */
 function convertFieldsFromGlobalId(Model, data) {
