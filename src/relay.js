@@ -23,7 +23,6 @@ import JSONType from './types/jsonType';
 import {replaceWhereOperators} from './replaceWhereOperators';
 
 import {Model} from 'sequelize';
-import {replaceWhereOperators} from './replaceWhereOperators.js';
 
 function getModelOfInstance(instance) {
   return instance instanceof Model ? instance.constructor : instance.Model;

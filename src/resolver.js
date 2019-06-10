@@ -78,9 +78,6 @@ function resolverFactory(targetMaybeThunk, options = {}) {
         type instanceof GraphQLList ||
         type instanceof GraphQLNonNull && type.ofType instanceof GraphQLList;
 
-    let targetAttributes = Object.keys(model.rawAttributes)
-      , findOptions = argsToFindOptions(args, targetAttributes);
-
     if (options.globalId === true) {
       if( args.id != null ) {
         const {id} = fromGlobalId(args.id);
@@ -89,6 +86,9 @@ function resolverFactory(targetMaybeThunk, options = {}) {
         convertFieldsFromGlobalId(model, args.where);
       }
     }
+
+    let targetAttributes = Object.keys(model.rawAttributes)
+      , findOptions = argsToFindOptions(args, targetAttributes);
 
     info = {
       ...info,
