@@ -23,6 +23,7 @@ import JSONType from './types/jsonType';
 import {replaceWhereOperators} from './replaceWhereOperators';
 
 import {Model} from 'sequelize';
+import {replaceWhereOperators} from './replaceWhereOperators.js';
 
 function getModelOfInstance(instance) {
   return instance instanceof Model ? instance.constructor : instance.Model;
@@ -48,27 +49,31 @@ export class NodeTypeMapper {
 }
 
 export function idFetcher(sequelize, nodeTypeMapper) {
-  return async (globalId, context) => {
+  return async (globalId, context, info) => {
     const {type, id} = fromGlobalId(globalId);
 
     const nodeType = nodeTypeMapper.item(type);
     if (nodeType && typeof nodeType.resolve === 'function') {
-      const res = await Promise.resolve(nodeType.resolve(globalId, context));
+      const res = await Promise.resolve(nodeType.resolve(globalId, context, info));
       if (res) res.__graphqlType__ = type;
       return res;
     }
 
     const model = Object.keys(sequelize.models).find(model => model === type);
-    return model
-      ? sequelize.models[model].findById(id, {requestUser: context && context.user ? context.user : null})
-      : nodeType
-        ? nodeType.type
-        : null;
+    if (model) {
+      return sequelize.models[model].findById(id, {requestUser: context && context.user ? context.user : null});
+    }
+
+    if (nodeType) {
+      return typeof nodeType.type === 'string' ? info.schema.getType(nodeType.type) : nodeType.type;
+    }
+
+    return null;
   };
 }
 
 export function typeResolver(nodeTypeMapper) {
-  return obj => {
+  return (obj, context, info) => {
     var type = obj.__graphqlType__
                || (obj.Model
                  ? obj.Model.options.name.singular
@@ -82,7 +87,11 @@ export function typeResolver(nodeTypeMapper) {
     }
 
     const nodeType = nodeTypeMapper.item(type);
-    return nodeType && nodeType.type || null;
+    if (nodeType) {
+      return typeof nodeType.type === 'string' ? info.schema.getType(nodeType.type) : nodeType.type;
+    }
+
+    return null;
   };
 }
 
@@ -139,13 +148,15 @@ export function createConnectionResolver({
 
   /**
    * Creates a cursor given a item returned from the Database
-   * @param  {Object}   item   sequelize model instance
+   * @param  {Object}   item   sequelize row
    * @param  {Integer}  index  the index of this item within the results, 0 indexed
    * @return {String}          The Base64 encoded cursor string
    */
   let toCursor = function (item, index) {
-    const {primaryKeyAttribute} = getModelOfInstance(item);
-    const id = typeof primaryKeyAttribute === 'string' ? item.get(primaryKeyAttribute) : null;
+    const model = getModelOfInstance(item);
+    const id = model ?
+               typeof model.primaryKeyAttribute === 'string' ? item[model.primaryKeyAttribute] : null :
+               item[Object.keys(item)[0]];
     return base64(JSON.stringify([id, index]));
   };
 
@@ -173,10 +184,10 @@ export function createConnectionResolver({
         _.assign(result, replaceWhereOperators(value));
       }
       if (ignoreArgs && key in ignoreArgs) return;
-      _.assign(result, where(key, value, result));
+      Object.assign(result, where(key, value, result));
     });
 
-    return result;
+    return replaceWhereOperators(result);
   };
 
   let resolveEdge = function (item, index, queriedCursor, sourceArgs = {}, source) {
@@ -206,6 +217,9 @@ export function createConnectionResolver({
       if (args.first || args.last) {
         options.limit = parseInt(args.first || args.last, 10);
       }
+
+      // Grab enum type by name if it's a string
+      orderByEnum = typeof orderByEnum === 'string' ? info.schema.getType(orderByEnum) : orderByEnum;
 
       let orderBy = args.orderBy ? args.orderBy :
                     orderByEnum ? [orderByEnum._values[0].value] :
@@ -241,7 +255,7 @@ export function createConnectionResolver({
             model.sequelize.literal('COUNT(*) OVER()'),
             'full_count'
           ]);
-        } else if (model.sequelize.dialect.name === 'mssql') {
+        } else if (model.sequelize.dialect.name === 'mssql' || model.sequelize.dialect.name === 'sqlite') {
           options.attributes.push([
             model.sequelize.literal('COUNT(1) OVER()'),
             'full_count'
@@ -261,6 +275,8 @@ export function createConnectionResolver({
           if (startIndex > 0) options.offset = startIndex + 1;
         }
       }
+
+      options.attributes.unshift(model.primaryKeyAttribute); // Ensure the primary key is always the first selected attribute
       options.attributes = _.uniq(options.attributes);
       return before(options, args, context, info);
     },
@@ -282,7 +298,9 @@ export function createConnectionResolver({
 
       let firstEdge = edges[0];
       let lastEdge = edges[edges.length - 1];
-      let fullCount = values[0] && values[0].dataValues.full_count && parseInt(values[0].dataValues.full_count, 10);
+      let fullCount = values[0] &&
+                      (values[0].dataValues || values[0]).full_count &&
+                      parseInt((values[0].dataValues || values[0]).full_count, 10);
 
       if (!values[0]) {
         fullCount = 0;
