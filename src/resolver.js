@@ -6,6 +6,7 @@ import assert from 'assert';
 import Promise from 'bluebird';
 import dataLoaderSequelize from 'dataloader-sequelize';
 import { fromGlobalId } from 'graphql-relay';
+import { EXPECTED_OPTIONS_KEY } from 'dataloader-sequelize';
 
 /* Copied from graphql-sequelize-crud library src/index.js file - START */
 function convertFieldsFromGlobalId(Model, data) {
@@ -152,6 +153,6 @@ function resolverFactory(targetMaybeThunk, options = {}) {
   };
 }
 
-resolverFactory.contextToOptions = {};
+resolverFactory.contextToOptions = {[EXPECTED_OPTIONS_KEY]: EXPECTED_OPTIONS_KEY};
 
 module.exports = resolverFactory;
