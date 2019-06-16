@@ -21,6 +21,7 @@ import _ from 'lodash';
 import simplifyAST from './simplifyAST';
 import JSONType from './types/jsonType';
 import {replaceWhereOperators} from './replaceWhereOperators';
+import {EXPECTED_OPTIONS_KEY} from 'dataloader-sequelize';
 
 import {Model} from 'sequelize';
 
@@ -360,6 +361,9 @@ export function createConnectionResolver({
         },
         fullCount
       }, args, context, info);
+    },
+    contextToOptions: {
+      [EXPECTED_OPTIONS_KEY]: EXPECTED_OPTIONS_KEY,
     }
   });
 
