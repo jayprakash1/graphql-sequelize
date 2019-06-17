@@ -21,6 +21,7 @@ import _ from 'lodash';
 import simplifyAST from './simplifyAST';
 import JSONType from './types/jsonType';
 import {replaceWhereOperators} from './replaceWhereOperators';
+import {EXPECTED_OPTIONS_KEY} from 'dataloader-sequelize';
 
 import {Model} from 'sequelize';
 
@@ -310,6 +311,7 @@ export function createConnectionResolver({
         const options = await Promise.resolve(before({
           where: argsToWhere(args)
         }, args, context, info));
+        options[EXPECTED_OPTIONS_KEY] = context[EXPECTED_OPTIONS_KEY];
 
         if (target.count) {
           if (target.associationType) {
