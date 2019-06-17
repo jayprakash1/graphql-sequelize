@@ -312,6 +312,7 @@ export function createConnectionResolver({
           where: argsToWhere(args)
         }, args, context, info));
         options[EXPECTED_OPTIONS_KEY] = context[EXPECTED_OPTIONS_KEY];
+        options.requestUser = context["user"];
 
         if (target.count) {
           if (target.associationType) {

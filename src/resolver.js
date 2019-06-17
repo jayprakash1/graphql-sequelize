@@ -153,6 +153,6 @@ function resolverFactory(targetMaybeThunk, options = {}) {
   };
 }
 
-resolverFactory.contextToOptions = {[EXPECTED_OPTIONS_KEY]: EXPECTED_OPTIONS_KEY};
+resolverFactory.contextToOptions = {[EXPECTED_OPTIONS_KEY]: EXPECTED_OPTIONS_KEY, requestUser: "user"};
 
 module.exports = resolverFactory;
