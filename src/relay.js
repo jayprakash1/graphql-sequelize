@@ -54,7 +54,7 @@ export function idFetcher(sequelize, nodeTypeMapper) {
 
     const model = Object.keys(sequelize.models).find(model => model === type);
     return model
-      ? sequelize.models[model].findById(id, {requestUser: context.user})
+      ? sequelize.models[model].findByPk(id, {requestUser: context.user})
       : nodeType
         ? nodeType.type
         : null;
