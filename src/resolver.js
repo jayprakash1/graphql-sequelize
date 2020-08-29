@@ -62,6 +62,10 @@ function resolverFactory(target, options) {
       , list = options.list || type instanceof GraphQLList
       , findOptions = argsToFindOptions(args, targetAttributes);
 
+    if (options.useMaster === true) {
+      findOptions.useMaster = true;
+    }
+
     info = {
       ...info,
       type: type,
