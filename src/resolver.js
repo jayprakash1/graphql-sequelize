@@ -66,6 +66,10 @@ function resolverFactory(target, options) {
       findOptions.useMaster = true;
     }
 
+    if (info != null && info.operation != null && info.operation.operation == "mutation" ) {
+      findOptions.useMaster = true;
+    }
+
     info = {
       ...info,
       type: type,
