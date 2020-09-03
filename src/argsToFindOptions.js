@@ -26,6 +26,10 @@ export default function argsToFindOptions(args, targetAttributes) {
         }
       }
 
+      if (key === 'useMaster' && args[key]) {
+        result.useMaster = true;
+      }
+
       if (key === 'where' && args[key]) {
         // setup where
         result.where = replaceWhereOperators(args.where);
