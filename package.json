@@ -41,7 +41,7 @@
   },
   "homepage": "https://github.com/mickhansen/graphql-sequelize",
   "dependencies": {
-    "dataloader-sequelize": "git://github.com/jayprakash1/dataloader-sequelize.git#e043bb2e03f8be7e9710d5581ad3611f35036bfc",
+    "dataloader-sequelize": "git://github.com/jayprakash1/dataloader-sequelize.git#7674bf69c27a83bf52231a3b45182cab5d50ab2b",
     "lodash": "^4.0.0"
   },
   "peerDependencies": {
